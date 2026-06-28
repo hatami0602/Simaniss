@@ -1265,7 +1265,7 @@
         let starSystem = null;
 
 // ================================================================
-// GALLERY SYSTEM - ULTIMATE FIX
+// GALLERY SYSTEM - FIXED VERSION
 // ================================================================
 class GallerySystem {
     constructor() {
@@ -1275,7 +1275,6 @@ class GallerySystem {
         this.currentIndex = 0;
         this.timer = 0;
         this.textures = [];
-        // PASTIKAN PATH INI BENAR
         this.imageUrls = [
             'satu.jpeg',
             'dua.jpeg', 
@@ -1287,9 +1286,7 @@ class GallerySystem {
         this.allLoaded = false;
         this.totalImages = this.imageUrls.length;
         this.isLoading = false;
-        this.fallbackImages = [
-            '🌅', '🌸', '🌊', '⭐'
-        ];
+        this.loadAttempts = {};
     }
 
     start() {
@@ -1301,6 +1298,7 @@ class GallerySystem {
         this.textures = [];
         this.loadedCount = 0;
         this.allLoaded = false;
+        this.loadAttempts = {};
 
         console.log('📸 Gallery System started...');
         gestureLabel.textContent = '✦ 🖼️ Loading Gallery...';
@@ -1315,142 +1313,113 @@ class GallerySystem {
         }
 
         this.imageUrls.forEach((url, index) => {
-            const canvas = document.createElement('canvas');
-            canvas.width = 512;
-            canvas.height = 384;
-            const ctx = canvas.getContext('2d');
-
-            // Background loading
-            this.drawLoadingScreen(ctx, index);
-            const texture = new THREE.CanvasTexture(canvas);
+            // Buat texture kosong dulu
+            const placeholderCanvas = document.createElement('canvas');
+            placeholderCanvas.width = 512;
+            placeholderCanvas.height = 384;
+            const pCtx = placeholderCanvas.getContext('2d');
+            
+            // Loading placeholder
+            const grad = pCtx.createRadialGradient(256, 192, 30, 256, 192, 250);
+            grad.addColorStop(0, '#2a1a4e');
+            grad.addColorStop(0.5, '#1a0a2e');
+            grad.addColorStop(1, '#05050e');
+            pCtx.fillStyle = grad;
+            pCtx.fillRect(0, 0, 512, 384);
+            
+            pCtx.fillStyle = 'rgba(255,255,255,0.3)';
+            pCtx.font = '24px Inter';
+            pCtx.textAlign = 'center';
+            pCtx.textBaseline = 'middle';
+            pCtx.fillText(`📸 Loading ${index + 1}/${this.totalImages}...`, 256, 192);
+            
+            const texture = new THREE.CanvasTexture(placeholderCanvas);
             this.textures[index] = texture;
-
-            // PERBAIKAN: Gunakan Image langsung tanpa crossOrigin
-            const img = new Image();
             
-            // Coba berbagai path
-            const paths = [
-                url,
-                `./${url}`,
-                `/${url}`,
-                `../${url}`,
-                `images/${url}`,
-                `./images/${url}`
-            ];
-            
-            let pathIndex = 0;
-            
-            const tryLoad = () => {
-                if (pathIndex >= paths.length) {
-                    console.warn(`❌ All paths failed for ${url}, using fallback`);
-                    this.drawFallbackImage(ctx, index);
-                    texture.needsUpdate = true;
-                    this.checkLoaded();
-                    return;
-                }
-                
-                const currentPath = paths[pathIndex];
-                console.log(`🔄 Trying: ${currentPath}`);
-                
-                img.onload = () => {
-                    console.log(`✅ Loaded: ${currentPath}`);
-                    this.drawImageToCanvas(ctx, img, index);
-                    texture.needsUpdate = true;
-                    this.checkLoaded();
-                };
-                
-                img.onerror = () => {
-                    console.warn(`❌ Failed: ${currentPath}`);
-                    pathIndex++;
-                    tryLoad();
-                };
-                
-                img.src = currentPath;
-                
-                // Timeout untuk next attempt
-                setTimeout(() => {
-                    if (!img.complete || img.naturalWidth === 0) {
-                        console.warn(`⏱️ Timeout: ${currentPath}`);
-                        pathIndex++;
-                        tryLoad();
-                    }
-                }, 3000);
-            };
-            
-            tryLoad();
+            // LOAD GAMBAR DENGAN CARA YANG LEBIH RELIABLE
+            this.loadImageWithXHR(url, index);
         });
     }
 
-    drawLoadingScreen(ctx, index) {
-        const grad = ctx.createRadialGradient(256, 192, 30, 256, 192, 250);
-        grad.addColorStop(0, '#2a1a4e');
-        grad.addColorStop(0.5, '#1a0a2e');
-        grad.addColorStop(1, '#05050e');
-        ctx.fillStyle = grad;
-        ctx.fillRect(0, 0, 512, 384);
-
-        ctx.fillStyle = 'rgba(255,255,255,0.3)';
-        ctx.font = '24px Inter';
-        ctx.textAlign = 'center';
-        ctx.textBaseline = 'middle';
-        ctx.fillText(`📸 Loading ${index + 1}/${this.totalImages}...`, 256, 192);
+    loadImageWithXHR(url, index) {
+        console.log(`🔄 Loading: ${url} with XHR`);
         
-        ctx.strokeStyle = 'rgba(124,77,255,0.2)';
-        ctx.lineWidth = 2;
-        ctx.strokeRect(20, 20, 472, 344);
+        // Gunakan fetch atau XMLHttpRequest untuk lebih reliable
+        fetch(url)
+            .then(response => {
+                if (!response.ok) {
+                    throw new Error(`HTTP error! status: ${response.status}`);
+                }
+                return response.blob();
+            })
+            .then(blob => {
+                const img = new Image();
+                img.onload = () => {
+                    console.log(`✅ Loaded: ${url}`);
+                    this.processLoadedImage(img, index);
+                };
+                img.onerror = (e) => {
+                    console.warn(`❌ Failed to decode: ${url}`, e);
+                    this.tryAlternativeLoad(url, index);
+                };
+                img.src = URL.createObjectURL(blob);
+            })
+            .catch(error => {
+                console.warn(`❌ Fetch failed: ${url}`, error);
+                this.tryAlternativeLoad(url, index);
+            });
     }
 
-    drawFallbackImage(ctx, index) {
-        const colors = ['#7c4dff', '#ff4fd8', '#00e5ff', '#ffd740'];
-        const emojis = ['🌅', '🌸', '🌊', '⭐'];
-        const titles = ['Sunset', 'Flower', 'Ocean', 'Star'];
-
-        const grad = ctx.createRadialGradient(256, 192, 30, 256, 192, 250);
-        grad.addColorStop(0, colors[index % colors.length]);
-        grad.addColorStop(0.5, '#1a0a2e');
-        grad.addColorStop(1, '#05050e');
-        ctx.fillStyle = grad;
-        ctx.fillRect(0, 0, 512, 384);
-
-        ctx.shadowColor = colors[index % colors.length];
-        ctx.shadowBlur = 60;
-        ctx.fillStyle = '#ffffff';
-        ctx.font = '80px Inter';
-        ctx.textAlign = 'center';
-        ctx.textBaseline = 'middle';
-        ctx.fillText(emojis[index % emojis.length], 256, 170);
-        ctx.shadowBlur = 0;
-
-        ctx.fillStyle = 'rgba(255,255,255,0.5)';
-        ctx.font = '20px Inter';
-        ctx.textAlign = 'center';
-        ctx.textBaseline = 'middle';
-        ctx.fillText(titles[index % titles.length], 256, 230);
-
-        ctx.fillStyle = 'rgba(255,255,255,0.2)';
-        ctx.font = '12px Inter';
-        ctx.fillText('✨ Gesture Gallery', 256, 260);
-
-        ctx.shadowColor = colors[index % colors.length];
-        ctx.shadowBlur = 30;
-        ctx.strokeStyle = colors[index % colors.length];
-        ctx.lineWidth = 2;
-        ctx.strokeRect(20, 20, 472, 344);
-        ctx.shadowBlur = 0;
+    tryAlternativeLoad(url, index) {
+        // Coba dengan Image langsung
+        const img = new Image();
+        img.crossOrigin = 'anonymous';
+        
+        img.onload = () => {
+            console.log(`✅ Loaded (alternative): ${url}`);
+            this.processLoadedImage(img, index);
+        };
+        
+        img.onerror = () => {
+            console.warn(`❌ All methods failed for: ${url}`);
+            // Coba dengan path absolut dari root
+            const altUrl = '/' + url;
+            img.src = altUrl;
+            
+            // Jika masih gagal, gunakan fallback
+            setTimeout(() => {
+                if (!img.complete || img.naturalWidth === 0) {
+                    console.warn(`⏱️ Timeout for: ${url}, using fallback`);
+                    this.useFallbackForIndex(index);
+                }
+            }, 2000);
+        };
+        
+        img.src = url;
+        
+        // Timeout
+        setTimeout(() => {
+            if (!img.complete || img.naturalWidth === 0) {
+                console.warn(`⏱️ Timeout alternative for: ${url}`);
+                this.useFallbackForIndex(index);
+            }
+        }, 3000);
     }
 
-    drawImageToCanvas(ctx, img, index) {
-        const canvas = ctx.canvas;
-        ctx.clearRect(0, 0, canvas.width, canvas.height);
-
+    processLoadedImage(img, index) {
+        const canvas = document.createElement('canvas');
+        canvas.width = 512;
+        canvas.height = 384;
+        const ctx = canvas.getContext('2d');
+        
         // Background
         ctx.fillStyle = '#0a0a1a';
-        ctx.fillRect(0, 0, canvas.width, canvas.height);
-
+        ctx.fillRect(0, 0, 512, 384);
+        
         // Draw image dengan aspect ratio
         const aspect = img.width / img.height;
         let dw, dh, dx, dy;
-
+        
         if (aspect > 1) {
             dw = 440;
             dh = 440 / aspect;
@@ -1462,7 +1431,7 @@ class GallerySystem {
             dx = (472 - dw) / 2 + 20;
             dy = 20;
         }
-
+        
         // Clip rounded rectangle
         ctx.save();
         ctx.beginPath();
@@ -1481,7 +1450,7 @@ class GallerySystem {
         ctx.clip();
         ctx.drawImage(img, dx, dy, dw, dh);
         ctx.restore();
-
+        
         // Border
         ctx.shadowColor = '#7c4dff';
         ctx.shadowBlur = 30;
@@ -1489,26 +1458,72 @@ class GallerySystem {
         ctx.lineWidth = 2;
         ctx.strokeRect(20, 20, 472, 344);
         ctx.shadowBlur = 0;
-
+        
         // Label
         ctx.fillStyle = 'rgba(255,255,255,0.3)';
         ctx.font = '14px Inter';
         ctx.textAlign = 'right';
         ctx.textBaseline = 'bottom';
         ctx.fillText(`✦ ${this.imageLabels[index] || `Photo ${index + 1}`}`, 480, 372);
+        
+        // Update texture
+        const newTexture = new THREE.CanvasTexture(canvas);
+        this.textures[index] = newTexture;
+        this.checkLoaded();
+    }
 
-        ctx.fillStyle = 'rgba(124,77,255,0.2)';
-        ctx.font = '10px Inter';
-        ctx.textAlign = 'left';
-        ctx.textBaseline = 'bottom';
-        ctx.fillText('✓', 30, 372);
+    useFallbackForIndex(index) {
+        const canvas = document.createElement('canvas');
+        canvas.width = 512;
+        canvas.height = 384;
+        const ctx = canvas.getContext('2d');
+        
+        const colors = ['#7c4dff', '#ff4fd8', '#00e5ff', '#ffd740'];
+        const emojis = ['🌅', '🌸', '🌊', '⭐'];
+        const titles = ['Sunset', 'Flower', 'Ocean', 'Star'];
+        
+        const grad = ctx.createRadialGradient(256, 192, 30, 256, 192, 250);
+        grad.addColorStop(0, colors[index % colors.length]);
+        grad.addColorStop(0.5, '#1a0a2e');
+        grad.addColorStop(1, '#05050e');
+        ctx.fillStyle = grad;
+        ctx.fillRect(0, 0, 512, 384);
+        
+        ctx.shadowColor = colors[index % colors.length];
+        ctx.shadowBlur = 60;
+        ctx.fillStyle = '#ffffff';
+        ctx.font = '80px Inter';
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'middle';
+        ctx.fillText(emojis[index % emojis.length], 256, 170);
+        ctx.shadowBlur = 0;
+        
+        ctx.fillStyle = 'rgba(255,255,255,0.5)';
+        ctx.font = '20px Inter';
+        ctx.fillText(titles[index % titles.length], 256, 230);
+        
+        ctx.fillStyle = 'rgba(255,255,255,0.2)';
+        ctx.font = '12px Inter';
+        ctx.fillText('✨ Gesture Gallery', 256, 260);
+        
+        ctx.shadowColor = colors[index % colors.length];
+        ctx.shadowBlur = 30;
+        ctx.strokeStyle = colors[index % colors.length];
+        ctx.lineWidth = 2;
+        ctx.strokeRect(20, 20, 472, 344);
+        ctx.shadowBlur = 0;
+        
+        const texture = new THREE.CanvasTexture(canvas);
+        this.textures[index] = texture;
+        this.checkLoaded();
     }
 
     checkLoaded() {
         this.loadedCount++;
+        console.log(`📸 Loaded ${this.loadedCount}/${this.totalImages}`);
+        
         if (this.loadedCount >= this.totalImages) {
             this.allLoaded = true;
-            // Tunggu sebentar sebelum build gallery
             setTimeout(() => {
                 this.buildGallery();
                 mainGroup.add(this.group);
@@ -1519,7 +1534,6 @@ class GallerySystem {
     }
 
     createFallbackGallery() {
-        // Buat gallery dengan fallback jika tidak ada gambar
         const total = 4;
         for (let i = 0; i < total; i++) {
             const canvas = document.createElement('canvas');
@@ -1537,13 +1551,49 @@ class GallerySystem {
         console.log('✅ Fallback gallery ready!');
     }
 
+    drawFallbackImage(ctx, index) {
+        const colors = ['#7c4dff', '#ff4fd8', '#00e5ff', '#ffd740'];
+        const emojis = ['🌅', '🌸', '🌊', '⭐'];
+        const titles = ['Sunset', 'Flower', 'Ocean', 'Star'];
+        
+        const grad = ctx.createRadialGradient(256, 192, 30, 256, 192, 250);
+        grad.addColorStop(0, colors[index % colors.length]);
+        grad.addColorStop(0.5, '#1a0a2e');
+        grad.addColorStop(1, '#05050e');
+        ctx.fillStyle = grad;
+        ctx.fillRect(0, 0, 512, 384);
+        
+        ctx.shadowColor = colors[index % colors.length];
+        ctx.shadowBlur = 60;
+        ctx.fillStyle = '#ffffff';
+        ctx.font = '80px Inter';
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'middle';
+        ctx.fillText(emojis[index % emojis.length], 256, 170);
+        ctx.shadowBlur = 0;
+        
+        ctx.fillStyle = 'rgba(255,255,255,0.5)';
+        ctx.font = '20px Inter';
+        ctx.fillText(titles[index % titles.length], 256, 230);
+        
+        ctx.fillStyle = 'rgba(255,255,255,0.2)';
+        ctx.font = '12px Inter';
+        ctx.fillText('✨ Gesture Gallery', 256, 260);
+        
+        ctx.shadowColor = colors[index % colors.length];
+        ctx.shadowBlur = 30;
+        ctx.strokeStyle = colors[index % colors.length];
+        ctx.lineWidth = 2;
+        ctx.strokeRect(20, 20, 472, 344);
+        ctx.shadowBlur = 0;
+    }
+
     buildGallery() {
         if (this.textures.length === 0) {
             console.warn('No textures to build gallery');
             return;
         }
-
-        // Bersihkan group lama
+        
         while (this.group.children.length) {
             const child = this.group.children[0];
             if (child.geometry) child.geometry.dispose();
@@ -1551,13 +1601,13 @@ class GallerySystem {
             this.group.remove(child);
         }
         this.photos = [];
-
+        
         const spacing = 3.8;
         const totalPhotos = this.textures.length;
-
+        
         this.textures.forEach((texture, index) => {
             const group = new THREE.Group();
-
+            
             // Frame
             const frameGeo = new THREE.BoxGeometry(3.0, 2.2, 0.12);
             const frameMat = new THREE.MeshBasicMaterial({
@@ -1568,7 +1618,7 @@ class GallerySystem {
             });
             const frame = new THREE.Mesh(frameGeo, frameMat);
             group.add(frame);
-
+            
             // Border
             const borderGeo = new THREE.EdgesGeometry(frameGeo);
             const borderMat = new THREE.LineBasicMaterial({
@@ -1579,7 +1629,7 @@ class GallerySystem {
             });
             const border = new THREE.LineSegments(borderGeo, borderMat);
             group.add(border);
-
+            
             // Photo
             const photoMat = new THREE.MeshBasicMaterial({
                 map: texture,
@@ -1591,7 +1641,7 @@ class GallerySystem {
             const photo = new THREE.Mesh(photoGeo, photoMat);
             photo.position.z = 0.06;
             group.add(photo);
-
+            
             // Position
             const angle = (index / totalPhotos) * Math.PI * 2;
             group.position.set(
@@ -1604,11 +1654,11 @@ class GallerySystem {
                 index: index,
                 angle: angle,
             };
-
+            
             this.group.add(group);
             this.photos.push(group);
         });
-
+        
         // Glow
         const glowGeo = new THREE.SphereGeometry(0.3, 16, 16);
         const glowMat = new THREE.MeshBasicMaterial({
@@ -1619,26 +1669,26 @@ class GallerySystem {
         });
         const glow = new THREE.Mesh(glowGeo, glowMat);
         this.group.add(glow);
-
+        
         console.log(`✅ Gallery built with ${totalPhotos} photos`);
     }
 
     update(delta, elapsed) {
         if (!this.isActive || this.photos.length === 0) return;
-
+        
         this.timer += delta;
         this.group.rotation.y += delta * 0.12;
-
+        
         this.photos.forEach((photo, i) => {
             const offset = (i - this.currentIndex + this.photos.length) % this.photos.length;
             const distance = Math.min(Math.abs(offset), this.photos.length - Math.abs(offset));
-
+            
             const floatY = Math.sin(elapsed * 0.4 + i * 0.8) * 0.2;
             photo.position.y = floatY;
-
+            
             const scale = offset === 0 ? 1 : 0.7 + (1 - distance / (this.photos.length / 2)) * 0.3;
             photo.scale.set(scale, scale, scale);
-
+            
             const opacity = 1 - (distance / (this.photos.length / 2)) * 0.4;
             photo.children.forEach(child => {
                 if (child.material && child.material.opacity !== undefined) {
@@ -1649,7 +1699,7 @@ class GallerySystem {
                     }
                 }
             });
-
+            
             if (offset === 0) {
                 const pulse = 0.8 + Math.sin(elapsed * 1.5) * 0.2;
                 photo.children.forEach(child => {
@@ -1659,7 +1709,7 @@ class GallerySystem {
                 });
             }
         });
-
+        
         if (this.timer > 3.5) {
             this.timer = 0;
             this.currentIndex = (this.currentIndex + 1) % this.photos.length;
